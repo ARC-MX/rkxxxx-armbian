@@ -12,7 +12,7 @@ on:
       set_release:
         description: "Select OS Release."
         required: false
-        default: "jammy"
+        default: "bookworm"
         type: choice
         options:
           - jammy
@@ -22,7 +22,7 @@ on:
       armbian_board:
         description: "Select device board."
         required: false
-        default: "all"
+        default: "panther-x2"
         type: choice
         options:
           - all
@@ -148,6 +148,7 @@ on:
           - sw799
           - tanix-tx6
           - tb-ls3399
+          - tinker-edge-r
           - tn3399
           - tqc-a01
           - tvi3315a
@@ -168,28 +169,25 @@ on:
           - 6.6.y
           - 6.1.y_6.6.y
           - 5.15.y_5.10.y
-      auto_kernel:
-        description: "Auto use the latest kernel."
+      armbian_desktop:
+        description: "Select desktop version."
         required: false
-        default: true
-        type: boolean
-      kernel_repo:
-        description: "Set the kernel repository."
-        required: false
-        default: "ophub/kernel"
+        default: "xfce"
         type: choice
         options:
-          - ophub/kernel
-      kernel_usage:
-        description: "Set the tags of the stable kernel."
+          - xfce
+          - cinnamon
+          - gnome
+          - i3-wm
+      armbian_branch:
+        description: "Set the tags of the armbian."
         required: false
-        default: "stable"
+        default: "v24.05"
         type: choice
         options:
-          - stable
-          - flippy
-          - dev
-          - beta
+          - v24.05
+          - v24.02
+          - main
       armbian_fstype:
         description: "Select armbian rootfs type."
         required: false
@@ -242,6 +240,7 @@ jobs:
           sudo -E apt-get -y update
           sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
           sudo -E apt-get -y install $(curl -fsSL https://is.gd/depend_ubuntu2204_armbian)
+          sudo -E apt-get install tar
           sudo -E systemctl daemon-reload
           #sudo -E apt-get -y full-upgrade
           sudo -E apt-get -y autoremove --purge
@@ -275,9 +274,8 @@ jobs:
         if: ${{ steps.init.outputs.status }} == 'success' && !cancelled()
         run: |
           df -hT ${PWD}
-          git clone -q --single-branch --depth=1 --branch=main https://github.com/armbian/build.git build
+          git clone -q --single-branch --depth=1 --branch=${{inputs.armbian_branch }} https://github.com/armbian/build.git build
           ln -sf /builder/build ${GITHUB_WORKSPACE}/build
-          ln -sf /builder/build /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/build
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Compile Armbian [ ${{ inputs.set_release }} ]
@@ -287,56 +285,30 @@ jobs:
         run: |
           # Compile method and parameter description: https://docs.armbian.com/Developer-Guide_Build-Options
           cd build/
-              ./compile.sh RELEASE=${{ inputs.set_release }} BOARD=odroidn2 BRANCH=current BUILD_MINIMAL=no \
-                           BUILD_ONLY=default HOST=armbian BUILD_DESKTOP=no EXPERT=yes KERNEL_CONFIGURE=no \
-                           COMPRESS_OUTPUTIMAGE="sha" SHARE_LOG=yes
+              ./compile.sh build RELEASE=${{ inputs.set_release }} BOARD=${{ inputs.armbian_board }} BRANCH=current BUILD_DESKTOP=yes \
+              DESKTOP_APPGROUPS_SELECTED='browsers' DESKTOP_ENVIRONMENT=${{ inputs.armbian_desktop }} DESKTOP_ENVIRONMENT_CONFIG_NAME=config_base \
+              HOST=armbian EXPERT=yes KERNEL_CONFIGURE=no \
+                          COMPRESS_OUTPUTIMAGE="sha" SHARE_LOG=yes
+          echo "build_tag=Armbian_${{ inputs.set_release }}_${{ inputs.armbian_board }}_${{ inputs.armbian_desktop }}_$(date +"%Y.%m")" >> ${GITHUB_OUTPUT}
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Organize files and clear space
-        id: clean
+      - name: Compresse Armbian image for Release
+        id: compresse
+        working-directory: /builder
         if: ${{ steps.compile.outputs.status }} == 'success' && !cancelled()
         run: |
-          # Organize and keep essential files, delete unnecessary files
-          chmod +x ${ROOTFS_SCRIPT}
-          ${ROOTFS_SCRIPT} -v ${{ inputs.set_release }}
-
-          # Output cleaning result information
-          df -hT ${PWD}
-          echo "build_tag=Armbian_${{ inputs.set_release }}_${{ inputs.armbian_storage }}_$(date +"%Y.%m")" >> ${GITHUB_OUTPUT}
+          cd build/output/images/
+          tar -czvf ${{ steps.compile.outputs.build_tag }}.tar.gz ./*
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Upload Armbian image to Release
         uses: ncipollo/release-action@main
-        if: ${{ steps.clean.outputs.status }} == 'success' && !cancelled()
+        # working-directory: /builder
+        if: ${{ steps.compresse.outputs.status }} == 'success' && !cancelled()
         with:
-          tag: ${{ steps.clean.outputs.build_tag }}
-          artifacts: build/output/images/*
+          tag: ${{ steps.compile.outputs.build_tag }}
+          artifacts: build/output/images/${{ steps.compile.outputs.build_tag }}.tar.gz
           allowUpdates: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Rebuild Armbian
-        uses: ophub/amlogic-s9xxx-armbian@main
-        if: ${{ steps.clean.outputs.status }} == 'success' && !cancelled()
-        with:
-          build_target: armbian
-          armbian_path: build/output/images/*.img.gz
-          armbian_board: ${{ inputs.armbian_board }}
-          armbian_kernel: ${{ inputs.armbian_kernel }}
-          auto_kernel: ${{ inputs.auto_kernel }}
-          kernel_repo: ${{ inputs.kernel_repo }}
-          kernel_usage: ${{ inputs.kernel_usage }}
-          armbian_fstype: ${{ inputs.armbian_fstype }}
-          builder_name: ${{ inputs.builder_name }}
-
-      - name: Upload Rebuild image to Release
-        uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS }} == 'success' && !cancelled()
-        with:
-          tag: ${{ steps.clean.outputs.build_tag }}
-          artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
-          allowUpdates: true
-          removeArtifacts: false
-          replacesArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             ### Armbian Image information
