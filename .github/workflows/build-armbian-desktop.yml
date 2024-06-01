@@ -3,20 +3,26 @@
 # Copyright (C) 2021 https://github.com/ophub/amlogic-s9xxx-armbian
 #==========================================================================
 
-name: Rebuild armbian
+name: Build armbian with desktop
 
 on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
-      armbian_url:
-        description: "Set Armbian file path."
+      set_release:
+        description: "Select OS Release."
         required: false
-        default: ""
+        default: "bookworm"
+        type: choice
+        options:
+          - jammy
+          - noble
+          - bullseye
+          - bookworm
       armbian_board:
         description: "Select device board."
         required: false
-        default: "all"
+        default: "panther-x2"
         type: choice
         options:
           - all
@@ -30,7 +36,6 @@ on:
           - crrc
           - dg3399
           - dlfr100
-          - e20c
           - e25
           - eaidk-610
           - emb3531
@@ -59,7 +64,6 @@ on:
           - renegade-rk3328
           - rk3318-box
           - rock5b
-          - rock5c
           - s905
           - s905-beelink-mini
           - s905-mxqpro-plus
@@ -144,6 +148,7 @@ on:
           - sw799
           - tanix-tx6
           - tb-ls3399
+          - tinker-edge-r
           - tn3399
           - tqc-a01
           - tvi3315a
@@ -164,56 +169,30 @@ on:
           - 6.6.y
           - 6.1.y_6.6.y
           - 5.15.y_5.10.y
-      auto_kernel:
-        description: "Auto use the latest kernel."
+      armbian_desktop:
+        description: "Select desktop version."
         required: false
-        default: true
-        type: boolean
-      kernel_repo:
-        description: "Set the kernel repository."
-        required: false
-        default: "ophub/kernel"
+        default: "xfce"
         type: choice
         options:
-          - ophub/kernel
-      kernel_usage:
-        description: "Set the tags of the stable kernel."
+          - xfce
+          - cinnamon
+          - gnome
+          - i3-wm
+      armbian_branch:
+        description: "Set the tags of the armbian."
         required: false
-        default: "stable"
+        default: "v24.05"
         type: choice
         options:
-          - stable
-          - flippy
-          - dev
-          - beta
-      armbian_fstype:
-        description: "Set armbian rootfs type."
-        required: false
-        default: "ext4"
-        type: choice
-        options:
-          - ext4
-          - btrfs
-      armbian_storage:
-        description: "Select image storage type."
-        required: false
-        default: "save"
-        type: choice
-        options:
-          - save
-          - temp
-      builder_name:
-        description: "Set Armbian builder signature."
-        required: false
-        default: "ophub"
-        type: choice
-        options:
-          - ophub
-          - angel
-          - yourname
+          - v24.05
+          - v24.02
+          - main
+
 
 env:
   TZ: America/New_York
+  ROOTFS_SCRIPT: compile-kernel/tools/script/armbian_rootfs.sh
 
 jobs:
   build:
@@ -237,6 +216,7 @@ jobs:
           sudo -E apt-get -y update
           sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
           sudo -E apt-get -y install $(curl -fsSL https://is.gd/depend_ubuntu2204_armbian)
+          sudo -E apt-get install tar
           sudo -E systemctl daemon-reload
           #sudo -E apt-get -y full-upgrade
           sudo -E apt-get -y autoremove --purge
@@ -264,68 +244,47 @@ jobs:
           sudo chown -R runner.runner /builder
           df -Th
 
-      - name: Set download address
+      - name: Download source code
         id: down
         working-directory: /builder
+        if: ${{ steps.init.outputs.status }} == 'success' && !cancelled()
         run: |
-          # Get the url of the rebuild armbian file
-          armbian_url="${{ inputs.armbian_url }}"
-          if  [[ -z "${armbian_url}" ]]; then
-              armbian_site="https://armbian.tnahosting.net/dl/odroidn2/archive/"
-              armbian_name="Armbian.*jammy.*.img.xz"
-              armbian_file=$(curl -s "${armbian_site}" | grep -oE "${armbian_name}" | head -n 1)
-              if [[ -n "${armbian_file}" ]]; then
-                  armbian_url="${armbian_site}${armbian_file}"
-              else
-                  echo -e "Invalid download path: [ ${armbian_site} ]"
-                  exit 1
-              fi
-          fi
-          echo "ARMBIAN_URL=${armbian_url}" >> ${GITHUB_ENV}
-
-          # Get the release name of the rebuild armbian file
-          set_release=""
-          ARR_RELEASE=("jammy" "focal" "bullseye" "buster" "sid")
-          i=1
-          for r in ${ARR_RELEASE[*]}; do
-              if [[ "${armbian_url}" == *"${r}"* ]]; then
-                  set_release="_${r}"
-                  break
-              fi
-              let i++
-          done
-
-          mkdir -p /builder/build
+          df -hT ${PWD}
+          git clone -q --single-branch --depth=1 --branch=${{inputs.armbian_branch }} https://github.com/armbian/build.git build
           ln -sf /builder/build ${GITHUB_WORKSPACE}/build
-          ln -sf /builder/build /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/build
-
-          sudo timedatectl set-timezone "${TZ}"
-          echo "build_tag=Armbian${set_release}_${{ inputs.armbian_storage }}_$(date +"%Y.%m")" >> ${GITHUB_OUTPUT}
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Rebuild Armbian
-        uses: ophub/amlogic-s9xxx-armbian@main
-        if: ${{ env.ARMBIAN_URL }} != '' && !cancelled()
-        with:
-          build_target: armbian
-          armbian_path: ${{ env.ARMBIAN_URL }}
-          armbian_board: ${{ inputs.armbian_board }}
-          armbian_kernel: ${{ inputs.armbian_kernel }}
-          auto_kernel: ${{ inputs.auto_kernel }}
-          kernel_repo: ${{ inputs.kernel_repo }}
-          kernel_usage: ${{ inputs.kernel_usage }}
-          armbian_fstype: ${{ inputs.armbian_fstype }}
-          builder_name: ${{ inputs.builder_name }}
+      - name: Compile Armbian [ ${{ inputs.set_release }} ]
+        id: compile
+        working-directory: /builder
+        if: ${{ steps.down.outputs.status }} == 'success' && !cancelled()
+        run: |
+          # Compile method and parameter description: https://docs.armbian.com/Developer-Guide_Build-Options
+          cd build/
+              ./compile.sh build RELEASE=${{ inputs.set_release }} BOARD=${{ inputs.armbian_board }} BRANCH=current BUILD_DESKTOP=yes \
+              DESKTOP_APPGROUPS_SELECTED='browsers' DESKTOP_ENVIRONMENT=${{ inputs.armbian_desktop }} DESKTOP_ENVIRONMENT_CONFIG_NAME=config_base \
+              HOST=armbian EXPERT=yes KERNEL_CONFIGURE=no APPGROUPS_SELECTED='browsers desktop_tools editors internet multimedia office \ 
+              programming remote_desktop' COMPRESS_OUTPUTIMAGE="sha" SHARE_LOG=yes
+          echo "build_tag=Armbian_${{ inputs.set_release }}_${{ inputs.armbian_board }}_${{ inputs.armbian_desktop }}_$(date +"%Y.%m")" >> ${GITHUB_OUTPUT}
+          echo "status=success" >> ${GITHUB_OUTPUT}
+
+      - name: Compresse Armbian image for Release
+        id: compresse
+        working-directory: /builder
+        if: ${{ steps.compile.outputs.status }} == 'success' && !cancelled()
+        run: |
+          cd build/output/images/
+          tar -czvf ${{ steps.compile.outputs.build_tag }}.tar.gz ./*
+          echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Upload Armbian image to Release
         uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS }} == 'success' && !cancelled()
+        # working-directory: /builder
+        if: ${{ steps.compresse.outputs.status }} == 'success' && !cancelled()
         with:
-          tag: ${{ steps.down.outputs.build_tag }}
-          artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
+          tag: ${{ steps.compile.outputs.build_tag }}
+          artifacts: build/output/images/${{ steps.compile.outputs.build_tag }}.tar.gz
           allowUpdates: true
-          removeArtifacts: false
-          replacesArtifacts: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             ### Armbian Image information
