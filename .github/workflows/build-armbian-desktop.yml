@@ -181,9 +181,9 @@ on:
           - i3-wm
       armbian_branch:
         description: "Set the tags of the armbian."
-        required: false
+        required: true
         default: "main"
-        type: choice
+        type: string
         options:
           - v24.05
           - v24.02

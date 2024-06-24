@@ -210,9 +210,9 @@ on:
           - temp
       builder_name:
         description: "Set Armbian builder signature."
-        required: false
+        required: true
         default: "ophub"
-        type: choice
+        type: string
         options:
           - ophub
           - angel
