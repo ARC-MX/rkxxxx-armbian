@@ -266,7 +266,7 @@ jobs:
               DESKTOP_APPGROUPS_SELECTED='browsers' DESKTOP_ENVIRONMENT=${{ inputs.armbian_desktop }} DESKTOP_ENVIRONMENT_CONFIG_NAME=config_base \
               HOST=armbian EXPERT=yes KERNEL_CONFIGURE=no APPGROUPS_SELECTED='browsers desktop_tools editors internet multimedia office \ 
               programming remote_desktop' COMPRESS_OUTPUTIMAGE="sha" SHARE_LOG=yes
-          echo "build_tag=Armbian_${{ inputs.set_release }}_${{ inputs.armbian_board }}_${{ inputs.armbian_desktop }}_$(date +"%Y.%m")" >> ${GITHUB_OUTPUT}
+          echo "build_tag=Armbian_${{ inputs.set_release }}_${{ inputs.armbian_board }}_${{ inputs.armbian_desktop }}_${{ inputs.armbian_branch }}_$(date +"%Y.%m.%d")" >> ${GITHUB_OUTPUT}
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Compresse Armbian image for Release
