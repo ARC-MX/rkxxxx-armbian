@@ -83,7 +83,7 @@ dev_repo="https://github.com/ophub/kernel/releases/download/dev"
 gun_file="arm-gnu-toolchain-13.2.rel1-aarch64-aarch64-none-elf.tar.xz"
 # Set the toolchain path
 toolchain_path="/usr/local/toolchain"
-# Set the default cross-compilation toolchain: [ gcc / clang ]
+# Set the default cross-compilation toolchain: [ clang / gcc / gcc-13.2, etc. ]
 toolchain_name="gcc"
 
 # Set font color
@@ -191,6 +191,12 @@ init_var() {
     #
     [[ -n "${code_owner}" ]] || error_msg "The [ -r ] parameter is invalid."
     [[ -n "${code_branch}" ]] || code_branch="${repo_branch}"
+
+    # Set the gcc version code
+    [[ "${toolchain_name}" =~ ^gcc-[0-9]+.[0-9]+ ]] && {
+        gcc_version_code="${toolchain_name#*-}"
+        gun_file="arm-gnu-toolchain-${gcc_version_code}.rel1-aarch64-aarch64-none-elf.tar.xz"
+    }
 
     # Set compilation parameters
     export SRC_ARCH="arm64"
@@ -702,6 +708,16 @@ loop_recompile() {
         else
             server_kernel_repo="${code_owner}/${code_repo}"
             local_kernel_path="${code_repo}-${code_branch}"
+        fi
+
+        # Check disk space size
+        echo -ne "(${j}) Start compiling the kernel [\033[92m ${kernel_version} \033[0m]. "
+        now_remaining_space="$(df -Tk ${kernel_path} | tail -n1 | awk '{print $5}' | echo $(($(xargs) / 1024 / 1024)))"
+        if [[ "${now_remaining_space}" -le "15" ]]; then
+            echo -e "${WARNING} Remaining space is less than 15G, exit the compilation."
+            break
+        else
+            echo "Remaining space is ${now_remaining_space}G."
         fi
 
         # Execute the following functions in sequence
