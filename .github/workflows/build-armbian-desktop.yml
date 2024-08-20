@@ -70,6 +70,14 @@ on:
           - v24.05
           - v24.02
           - main
+      armbian_source:
+        description: "Select the source of the armbian."
+        required: true
+        default: "official"
+        type: choice
+        options:
+          - official
+          - ARC-MX
 
 
 env:
@@ -129,12 +137,19 @@ jobs:
       - name: Download source code
         id: down
         working-directory: /builder
-        if: ${{ steps.init.outputs.status }} == 'success' && !cancelled()
+        if: ${{ steps.init.outputs.status }} == 'success' && ${{inputs.armbian_source }} == 'official' && !cancelled()
         run: |
           df -hT ${PWD}
-          git clone -q --single-branch --depth=1 --branch=${{inputs.armbian_branch }} https://github.com/armbian/build.git build
+          if [ ${{inputs.armbian_source }} == 'official' ]; then
+            git clone -q --single-branch --depth=1 --branch=${{inputs.armbian_branch }} https://github.com/armbian/build.git build
+            echo "git clone https://github.com/armbian/build.git" 
+          else 
+            git clone -q --single-branch --depth=1 --branch=${{inputs.armbian_branch }} https://github.com/ARC-MX/build.git build
+            echo "git clone https://github.com/ARC-MX/build.git"
+          fi
           ln -sf /builder/build ${GITHUB_WORKSPACE}/build
           echo "status=success" >> ${GITHUB_OUTPUT}
+
 
       - name: Compile Armbian [ ${{ inputs.set_release }} ]
         id: compile
